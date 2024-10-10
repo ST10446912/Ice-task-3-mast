@@ -1,0 +1,283 @@
+Ice task 3 
+
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, Button, StyleSheet, Alert, TouchableOpacity, Image, FlatList } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { NavigationContainer } from '@react-navigation/native';
+import { createStackNavigator } from '@react-navigation/stack';
+
+// Card Data with Contaminants
+const cardData = [
+  { id: 1, item: 'Plastic Bottle', image: require('./assets/plastic_bottle.png'), type: 'recyclable' },
+  { id: 2, item: 'Paper Bag', image: require('./assets/paper_bag.png'), type: 'recyclable' },
+  { id: 3, item: 'Glass Jar', image: require('./assets/glass_jar.png'), type: 'recyclable' },
+  { id: 4, item: 'Aluminum Can', image: require('./assets/aluminum_can.png'), type: 'recyclable' },
+  { id: 5, item: 'Plastic Lid', image: require('./assets/plastic_lid.png'), type: 'recyclable' },
+  { id: 6, item: 'Cardboard Box', image: require('./assets/cardboard_box.png'), type: 'recyclable' },
+  { id: 7, item: 'Non-Recyclable Item', image: require('./assets/non_recyclable.png'), type: 'contaminant' },
+  { id: 8, item: 'Food Waste', image: require('./assets/food_waste.png'), type: 'contaminant' },
+];
+
+const Stack = createStackNavigator();
+
+export default function App() {
+  return (
+    <NavigationContainer>
+      <Stack.Navigator initialRouteName="Home">
+        <Stack.Screen name="Home" component={HomeScreen} />
+        <Stack.Screen name="Game" component={GameScreen} />
+        <Stack.Screen name="Result" component={ResultScreen} />
+        <Stack.Screen name="Leaderboard" component={LeaderboardScreen} />
+      </Stack.Navigator>
+    </NavigationContainer>
+  );
+}
+
+// Home Screen
+function HomeScreen({ navigation }) {
+  return (
+    <View style={styles.container}>
+      <Text style={styles.title}>Recycling Challenge!</Text>
+      <Text style={styles.description}>
+        Help clean up! Match recyclable items before the garbage truck arrives. Avoid contaminants!
+      </Text>
+      <Button title="Start Recycling" onPress={() => navigation.navigate('Game')} />
+    </View>
+  );
+}
+
+// Game Screen
+function GameScreen({ navigation }) {
+  const [cards, setCards] = useState([]);
+  const [flippedCards, setFlippedCards] = useState([]);
+  const [matchedPairs, setMatchedPairs] = useState([]);
+  const [timeLeft, setTimeLeft] = useState(60);
+  const [score, setScore] = useState(0);
+  const [isGameOver, setIsGameOver] = useState(false);
+  const [garbageTruckArrival, setGarbageTruckArrival] = useState(45); 
+  const [completionTime, setCompletionTime] = useState(0);
+  const [isRecyclingRush, setIsRecyclingRush] = useState(false);
+  const timerRef = useRef(null);
+
+  useEffect(() => {
+    startGame();
+    return () => clearInterval(timerRef.current);
+  }, []);
+
+  useEffect(() => {
+    if (timeLeft <= 0) {
+      endGame();
+    }
+    if (timeLeft <= 10 && !isRecyclingRush) {
+      setIsRecyclingRush(true);
+      Alert.alert('Recycling Rush!', 'Hurry up! The garbage truck is almost here!');
+    }
+  }, [timeLeft]);
+
+  const startGame = () => {
+    const shuffledCards = [...cardData, ...cardData].sort(() => Math.random() - 0.5).slice(0, 12);
+    setCards(shuffledCards);
+    setScore(0);
+    setMatchedPairs([]);
+    setTimeLeft(garbageTruckArrival);
+    setIsGameOver(false);
+    setIsRecyclingRush(false);
+    setCompletionTime(0);
+    timerRef.current = setInterval(() => setTimeLeft((prev) => prev - 1), 1000);
+  };
+
+  const endGame = () => {
+    clearInterval(timerRef.current);
+    setIsGameOver(true);
+    setCompletionTime(garbageTruckArrival - timeLeft);
+    saveScore();
+    Alert.alert('Time Up!', `Your score: ${score}`, [
+      { text: 'OK', onPress: () => navigation.navigate('Result', { score, completionTime }) },
+    ]);
+  };
+
+  const flipCard = (id) => {
+    if (flippedCards.length < 2 && !flippedCards.includes(id) && !matchedPairs.includes(id)) {
+      setFlippedCards((prev) => [...prev, id]);
+      if (flippedCards.length === 1) {
+        setTimeout(() => checkMatch(id), 1000); 
+      }
+    }
+  };
+
+  const checkMatch = (id) => {
+    const [firstCardId] = flippedCards;
+    const firstCard = cards.find((card) => card.id === firstCardId);
+    const secondCard = cards.find((card) => card.id === id);
+
+    if (firstCard && secondCard && firstCard.item === secondCard.item && firstCard.id !== secondCard.id) {
+      setMatchedPairs((prev) => [...prev, firstCardId, id]);
+      setScore((prev) => prev + (firstCard.type === 'recyclable' ? 100 : -50));
+    } else if (firstCard.type === 'contaminant' || secondCard.type === 'contaminant') {
+      Alert.alert('Contaminant!', 'You matched a non-recyclable item. Points deducted!');
+      setScore((prev) => prev - 50); 
+    } else {
+      setScore((prev) => prev - 25);
+    }
+
+    setTimeout(() => setFlippedCards([]), 1000); 
+  };
+
+  const saveScore = async () => {
+    try {
+      const scores = JSON.parse(await AsyncStorage.getItem('leaderboard')) || [];
+      scores.push({ score, completionTime });
+      await AsyncStorage.setItem('leaderboard', JSON.stringify(scores));
+    } catch (error) {
+      console.error('Error saving score:', error);
+    }
+  };
+
+  const isFlipped = (id) => flippedCards.includes(id) || matchedPairs.includes(id);
+
+  return (
+    <View style={styles.container}>
+      <Image source={require('./assets/recycling_bin.png')} style={styles.binImage} />
+      <Text style={styles.title}>Time Left: {timeLeft}s</Text>
+      <Text style={styles.score}>Score: {score}</Text>
+      <View style={styles.grid}>
+        {cards.map((card) => (
+          <TouchableOpacity key={card.id} onPress={() => flipCard(card.id)} disabled={isGameOver || isFlipped(card.id)}>
+            <View style={[styles.card, isFlipped(card.id) ? styles.flipped : styles.unflipped]}>
+              {isFlipped(card.id) && <Image source={card.image} style={styles.cardImage} />}
+              {isFlipped(card.id) && <Text style={styles.cardText}>{card.item}</Text>}
+            </View>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      {/* Play Again Button */}
+      {isGameOver && (
+        <View style={styles.playAgainButtonContainer}>
+          <Button title="Play Again" onPress={startGame} />
+        </View>
+      )}
+    </View>
+  );
+}
+
+// Result Screen
+function ResultScreen({ route, navigation }) {
+  const { score, completionTime } = route.params;
+
+  return (
+    <View style={styles.container}>
+      <Text style={styles.title}>Game Over!</Text>
+      <Text style={styles.score}>Your final score: {score}</Text>
+      <Text style={styles.score}>Completion Time: {completionTime}s</Text>
+      <Button title="Recycle More" onPress={() => navigation.navigate('Game')} />
+      <Button title="View Leaderboard" onPress={() => navigation.navigate('Leaderboard')} />
+    </View>
+  );
+}
+
+// Leaderboard Screen
+function LeaderboardScreen() {
+  const [leaderboard, setLeaderboard] = useState([]);
+
+  useEffect(() => {
+    const loadScores = async () => {
+      try {
+        const scores = JSON.parse(await AsyncStorage.getItem('leaderboard')) || [];
+        console.log('Loaded scores:', scores); 
+        if (scores.length === 0) {
+          console.log('No scores found.'); 
+        } else {
+          setLeaderboard(scores.sort((a, b) => b.score - a.score));
+        }
+      } catch (error) {
+        console.error('Error loading scores:', error);
+      }
+    };
+    loadScores();
+  }, []);
+
+  return (
+    <View style={styles.container}>
+      <Text style={styles.title}>Leaderboard</Text>
+      {leaderboard.length === 0 ? (
+        <Text>No scores yet. Play a game to set a high score!</Text>
+      ) : (
+        <FlatList
+          data={leaderboard}
+          keyExtractor={(item, index) => index.toString()}
+          renderItem={({ item, index }) => (
+            <Text style={styles.scoreText}>
+              {index + 1}. Score: {item.score} | Time: {item.completionTime}s
+            </Text>
+          )}
+        />
+      )}
+    </View>
+  );
+}
+
+
+// Styles
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 20,
+  },
+  description: {
+    fontSize: 16,
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  score: {
+    fontSize: 18,
+    marginBottom: 10,
+  },
+  binImage: {
+    width: 100,
+    height: 100,
+    marginBottom: 20,
+  },
+  grid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+  },
+  card: {
+    width: 100,
+    height: 120,
+    margin: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#ddd',
+    borderRadius: 10,
+  },
+  flipped: {
+    backgroundColor: '#f0f0f0',
+  },
+  unflipped: {
+    backgroundColor: '#b0b0b0',
+  },
+  cardImage: {
+    width: 60,
+    height: 60,
+  },
+  cardText: {
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  scoreText: {
+    fontSize: 18,
+    paddingVertical: 10,
+  },
+  playAgainButtonContainer: {
+    marginTop: 20,
+  },
+});
